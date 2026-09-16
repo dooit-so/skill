@@ -54,14 +54,18 @@ month's goals. Don't reconstruct this from several `list_tasks` calls; it is
 cheaper and it is the shape the user thinks in.
 
 **"Show me X"** — `list_tasks` filters by project (`projectId`, or `noProject`
-for loose tasks), completion (`done`), archive state (`includeArchived`) and
-date range (`dueOnOrBefore` / `dueOnOrAfter`), with a `limit`. It returns terse
-rows without descriptions; reach for `get_task` when the user asks about one
-task's detail. `list_goals` takes the same period shortcuts as `create_goal`.
+for loose tasks), status column (`statusId`), completion (`done`), archive
+state (`includeArchived`) and date range (`dueOnOrBefore` / `dueOnOrAfter`),
+with a `limit`. It returns terse rows without descriptions, open tasks in
+column order (top to bottom within each column). `day: "today"` (or an ISO
+date) returns one day's list instead, in the order the Today page or the
+Calendar shows it. Reach for `get_task` when the user asks about one task's
+detail. `list_goals` takes the same period shortcuts as `create_goal`.
 
 **"Add this"** — `create_task` with `name`, and optionally `description`,
-`projectId`, `statusId` and `schedule`. Defaults are no project, no date, and
-the user's default status. Two things worth knowing:
+`projectId`, `statusId`, `schedule`, and a place (below). Defaults are no
+project, no date, and the user's default status, at the bottom of that column.
+Worth knowing:
 
 - **Scheduling routes the task for you.** Setting a date moves it between the
   Today and Scheduled columns automatically. Don't also set a `statusId` to
@@ -70,11 +74,40 @@ the user's default status. Two things worth knowing:
   `schedule: { type: "recurring", recurringRule: { granularity, interval,
   anchor, … }, recurringText: "Every Monday" }`. `recurringText` is what the
   user reads on the card, so write it the way they said it.
+- **Descriptions are Markdown (GFM).** Headings, lists, task lists
+  (`- [ ]`), links, code — they render in the app exactly as you'd expect,
+  and `get_task` returns the description as Markdown too.
 
 **"Move / rename / reschedule"** — `update_task`. Only the fields you pass
 change. `schedule: null` clears the date or recurrence; `projectId: null` pulls
 the task out of its project. To move a task between columns, pass a `statusId`
 from `get_board`.
+
+**"Put it first / move it up / order my day"** — a task has a place in two
+orders, so first work out which one the user means:
+
+- **`columnPosition`** — its status column: the board's columns, project boards,
+  and Today's List and Kanban layouts. Read it with `list_tasks` + `statusId`.
+- **`dayPosition`** — its day: Today's flat list (everything due today or
+  earlier) and the Calendar. Read it with `list_tasks` + `day`. Open, dated
+  tasks only.
+
+"My day" and "today's list" mean `dayPosition`; a column, a project or a
+status means `columnPosition`. When it's unclear, set both — unless the task
+has no date, in which case it only has a column. Each takes `"top"`,
+`"bottom"`, or `{ aboveTaskId }` / `{ belowTaskId }` with an id from the
+matching read, on `update_task` or `create_task`. Naming a neighbour also
+moves the task into that neighbour's column or day, the same as dragging it
+there, so "put X right after Y" is one call; don't add a `statusId` or
+`schedule` that disagrees with it. The Done column is ordered by completion
+time and takes no position.
+
+To set a whole order — "today: A, then B, then C" — use `move_tasks` with the
+ids in that order and a place for the block, e.g. `dayPosition: "top"`. It is
+all or nothing and counts as one write. If a day move would give a repeating
+task a new date, the call fails asking for `keepRecurring`: ask the user
+whether the rule stays (`true` moves just this occurrence, `false` makes it a
+one-off), then retry. Never answer that for them.
 
 **"Done"** — `set_task_done` with `done: true` (or `false` to reopen). It's
 idempotent, so a double-call is harmless. Completing a recurring task schedules
@@ -119,7 +152,8 @@ don't reach.
 
 - **"Plan my day"** — `get_agenda`, then propose a shortlist: overdue first,
   then due-today, then a couple of unscheduled items that fit this week's
-  goals. Schedule only what the user agrees to.
+  goals. Schedule only what the user agrees to, then — if they want an order —
+  set it with one `move_tasks` call (`dayPosition: "top"`).
 - **"Clear my day"** — pull today's open tasks, then `update_task` to push what
   the user picks to a real date. Don't blanket-move; ask what actually moves.
 - **"Weekly review"** — `list_goals` with `period: "this-week"`, `list_tasks`
